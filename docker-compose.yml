@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-portfolio}
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portfolio} -d ${POSTGRES_DB:-portfolio}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # entrypoint.sh ejecuta `alembic upgrade head` antes de arrancar uvicorn
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      - APP_PASSWORD=${APP_PASSWORD:?APP_PASSWORD is required}
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-60}
+      - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-5}
+      - BACKUP_DIR=${BACKUP_DIR:-/backups}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - BINANCE_API_BASE_URL=${BINANCE_API_BASE_URL:-https://api.binance.com}
+    volumes:
+      - ./apps/api:/app
+      - backups:/backups
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python -m sync.scheduler
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-5}
+      - BACKUP_DIR=${BACKUP_DIR:-/backups}
+      - BINANCE_API_BASE_URL=${BINANCE_API_BASE_URL:-https://api.binance.com}
+    volumes:
+      - ./apps/api:/app
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: dev
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - API_URL=http://api:8000
+    volumes:
+      # Montar solo código fuente — node_modules permanece del build del contenedor
+      - ./apps/web/app:/app/app
+      - ./apps/web/components:/app/components
+      - ./apps/web/lib:/app/lib
+      - ./apps/web/styles:/app/styles
+      - ./apps/web/public:/app/public
+      - ./apps/web/tailwind.config.ts:/app/tailwind.config.ts
+      - ./apps/web/next.config.mjs:/app/next.config.mjs
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  backups:

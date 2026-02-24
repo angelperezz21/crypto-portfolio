@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── Light mode ─────────────────────────────── */
+  :root {
+    --bg-base:       #f8f9fa;
+    --bg-surface:    #ffffff;
+    --bg-elevated:   #f1f3f5;
+    --bg-hover:      #e9ecef;
+    --border:        #dee2e6;
+    --border-subtle: #e9ecef;
+    --text-primary:  #0a0a0a;
+    --text-secondary:#6b7280;
+    --text-tertiary: #9ca3af;
+  }
+
+  /* ── Dark mode ──────────────────────────────── */
+  .dark {
+    --bg-base:       #080808;
+    --bg-surface:    #111111;
+    --bg-elevated:   #1c1c1c;
+    --bg-hover:      #222222;
+    --border:        #2a2a2a;
+    --border-subtle: #1a1a1a;
+    --text-primary:  #f5f5f5;
+    --text-secondary:#888888;
+    --text-tertiary: #555555;
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar — dark themed */
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+}
+
+@layer utilities {
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+}
