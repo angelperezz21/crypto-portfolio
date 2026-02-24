@@ -50,14 +50,16 @@ PCT_PRECISION = Decimal("0.01")           # 2 decimales para porcentajes
 @dataclass(frozen=True)
 class FIFOLot:
     quantity: Decimal
-    unit_cost: Decimal  # coste por unidad en USD
+    unit_cost: Decimal      # coste por unidad en USD
+    unit_cost_eur: Decimal  # coste por unidad en EUR histórico
 
 
 @dataclass
 class FIFOResult:
     remaining_lots: list[FIFOLot]
     realized_pnl: Decimal
-    cost_basis: Decimal   # sum(lot.quantity * lot.unit_cost)
+    cost_basis: Decimal      # sum(lot.quantity * lot.unit_cost) en USD
+    cost_basis_eur: Decimal  # sum(lot.quantity * lot.unit_cost_eur) en EUR histórico
 
 
 @dataclass
@@ -66,8 +68,10 @@ class AssetMetrics:
     quantity: Decimal
     value_usd: Decimal
     portfolio_pct: Decimal      # % del portafolio total (se rellena en overview)
-    avg_buy_price_usd: Decimal  # cost_basis / quantity
+    avg_buy_price_usd: Decimal  # cost_basis_usd / quantity
+    avg_buy_price_eur: Decimal  # cost_basis_eur / quantity (EUR histórico)
     cost_basis_usd: Decimal
+    cost_basis_eur: Decimal     # EUR histórico (tx.price para BTCEUR, aprox para BTCUSDT)
     pnl_usd: Decimal
     pnl_pct: Decimal            # (pnl / cost_basis) * 100
     realized_pnl_usd: Decimal
@@ -89,8 +93,10 @@ class DCABuyEvent:
     executed_at: datetime
     quantity: Decimal
     price_usd: Decimal
+    price_eur: Decimal           # EUR histórico: tx.price para BTCEUR; USD/eur_usd_actual para BTCUSDT
     cumulative_quantity: Decimal
-    cumulative_vwap: Decimal     # VWAP acumulado hasta este evento
+    cumulative_vwap: Decimal     # VWAP acumulado en USD hasta este evento
+    cumulative_vwap_eur: Decimal # VWAP acumulado en EUR histórico hasta este evento
 
 
 @dataclass
@@ -98,7 +104,8 @@ class DCAAnalysis:
     asset: str
     current_price_usd: Decimal
     total_quantity: Decimal
-    vwap_usd: Decimal            # precio promedio ponderado total
+    vwap_usd: Decimal            # precio promedio ponderado en USD
+    vwap_eur: Decimal            # precio promedio ponderado en EUR histórico
     cost_basis_usd: Decimal
     pnl_usd: Decimal
     pnl_pct: Decimal
@@ -140,15 +147,35 @@ def _usd_unit_cost(tx: "Transaction") -> Decimal:
     return tx.price if tx.price is not None else Decimal("0")
 
 
-def compute_fifo(buys: list["Transaction"], sells: list["Transaction"]) -> FIFOResult:
+def _eur_unit_cost(tx: "Transaction", eur_usd: Decimal) -> Decimal:
+    """
+    Precio unitario en EUR histórico.
+    - Trades BTCEUR: tx.price ya está en EUR — se usa directamente (exacto).
+    - Trades BTCUSDT: se convierte el precio USD con el tipo de cambio actual
+      (mejor aproximación posible sin almacenar el tipo histórico por transacción).
+    """
+    if tx.quote_asset == "EUR":
+        return tx.price if tx.price is not None else Decimal("0")
+    usd_cost = _usd_unit_cost(tx)
+    if eur_usd <= Decimal("0"):
+        return Decimal("0")
+    return (usd_cost / eur_usd).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+
+
+def compute_fifo(
+    buys: list["Transaction"],
+    sells: list["Transaction"],
+    eur_usd: Decimal = Decimal("1.08"),
+) -> FIFOResult:
     """
     Computa el coste base (FIFO) y el P&L realizado.
 
     buys:  transacciones buy/deposit ordenadas por executed_at ASC
     sells: transacciones sell/withdrawal ordenadas por executed_at ASC
+    eur_usd: tipo de cambio EUR/USD actual (usado para trades BTCUSDT).
 
-    unit_cost siempre en USD: usa total_value_usd/qty cuando está disponible
-    (necesario para trades BTCEUR donde price está en euros, no en dólares).
+    unit_cost en USD: usa total_value_usd/qty (histórico, correcto para BTCEUR).
+    unit_cost_eur: tx.price para BTCEUR (exacto); USD/eur_usd para BTCUSDT (aproximado).
     Los lots se consumen de más antiguo a más nuevo. Si una venta supera
     los lots disponibles (data gap), se ignora el exceso.
     """
@@ -156,6 +183,7 @@ def compute_fifo(buys: list["Transaction"], sells: list["Transaction"]) -> FIFOR
         FIFOLot(
             quantity=tx.quantity,
             unit_cost=_usd_unit_cost(tx),
+            unit_cost_eur=_eur_unit_cost(tx, eur_usd),
         )
         for tx in buys
     )
@@ -176,10 +204,11 @@ def compute_fifo(buys: list["Transaction"], sells: list["Transaction"]) -> FIFOR
                 lots.popleft()
             else:
                 realized_pnl += (sell_price - lot.unit_cost) * qty_to_sell
-                # Actualizar lot parcialmente (FIFOLot es frozen, crear nuevo)
+                # Lot parcialmente consumido — preservar unit_cost_eur del lot original
                 lots[0] = FIFOLot(
                     quantity=lot.quantity - qty_to_sell,
                     unit_cost=lot.unit_cost,
+                    unit_cost_eur=lot.unit_cost_eur,
                 )
                 qty_to_sell = Decimal("0")
 
@@ -188,11 +217,16 @@ def compute_fifo(buys: list["Transaction"], sells: list["Transaction"]) -> FIFOR
         (lot.quantity * lot.unit_cost for lot in remaining),
         Decimal("0"),
     )
+    cost_basis_eur = sum(
+        (lot.quantity * lot.unit_cost_eur for lot in remaining),
+        Decimal("0"),
+    )
 
     return FIFOResult(
         remaining_lots=remaining,
         realized_pnl=realized_pnl.quantize(PRICE_PRECISION, ROUND_HALF_UP),
         cost_basis=cost_basis.quantize(PRICE_PRECISION, ROUND_HALF_UP),
+        cost_basis_eur=cost_basis_eur.quantize(PRICE_PRECISION, ROUND_HALF_UP),
     )
 
 
@@ -441,6 +475,7 @@ class PortfolioService:
         """
         all_txns = await self._get_transactions()
         balances = await self._get_latest_balances()
+        eur_usd = current_prices.get("EUR", Decimal("1.08"))
 
         # Agrupar transacciones por activo
         by_asset: dict[str, list[Transaction]] = {}
@@ -458,7 +493,7 @@ class PortfolioService:
                 continue  # activo sin balance actual
 
             buys, sells = self._split_buys_sells(txns)
-            fifo = compute_fifo(buys, sells)
+            fifo = compute_fifo(buys, sells, eur_usd=eur_usd)
 
             value_usd = (quantity * price).quantize(PRICE_PRECISION, ROUND_HALF_UP)
             total_value += value_usd
@@ -470,8 +505,13 @@ class PortfolioService:
                 if cost_basis > Decimal("0")
                 else Decimal("0")
             )
-            avg_buy_price = (
+            avg_buy_price_usd = (
                 (cost_basis / quantity).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+                if quantity > Decimal("0")
+                else Decimal("0")
+            )
+            avg_buy_price_eur = (
+                (fifo.cost_basis_eur / quantity).quantize(PRICE_PRECISION, ROUND_HALF_UP)
                 if quantity > Decimal("0")
                 else Decimal("0")
             )
@@ -482,8 +522,10 @@ class PortfolioService:
                     quantity=quantity,
                     value_usd=value_usd,
                     portfolio_pct=Decimal("0"),  # se rellena abajo
-                    avg_buy_price_usd=avg_buy_price,
+                    avg_buy_price_usd=avg_buy_price_usd,
+                    avg_buy_price_eur=avg_buy_price_eur,
                     cost_basis_usd=cost_basis,
+                    cost_basis_eur=fifo.cost_basis_eur,
                     pnl_usd=pnl_usd,
                     pnl_pct=pnl_pct,
                     realized_pnl_usd=fifo.realized_pnl,
@@ -570,6 +612,7 @@ class PortfolioService:
         self,
         asset: str,
         current_price: Decimal,
+        eur_usd: Decimal = Decimal("1.08"),
     ) -> DCAAnalysis:
         """
         Análisis DCA para un activo:
@@ -602,32 +645,58 @@ class PortfolioService:
         )
 
         # Construir calendario: VWAP acumulado en cada compra
-        # Usa _usd_unit_cost() para convertir correctamente trades EUR→USD
+        # USD: usa _usd_unit_cost() (total_value_usd/qty) → precio histórico en USD correcto.
+        # EUR: para BTCEUR, tx.price ya es EUR — no necesita conversión.
+        #       para BTCUSDT, usamos usd/eur_usd_actual como aproximación (el usuario
+        #       pagó en USDT, no hay un "EUR pagado" exacto sin el tipo histórico).
         buy_events: list[DCABuyEvent] = []
         cum_qty = Decimal("0")
-        cum_cost = Decimal("0")
+        cum_usd_cost = Decimal("0")
+        cum_eur_cost = Decimal("0")
 
         for tx in buys:
-            unit_cost = _usd_unit_cost(tx)
+            unit_cost_usd = _usd_unit_cost(tx)
+
+            # Precio EUR histórico real: para BTCEUR usamos tx.price directamente,
+            # para BTCUSDT convertimos con el tipo actual (mejor aproximación posible
+            # sin almacenar el tipo histórico por transacción).
+            if tx.quote_asset == "EUR":
+                unit_cost_eur = tx.price if tx.price is not None else Decimal("0")
+            else:
+                unit_cost_eur = (
+                    (unit_cost_usd / eur_usd).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+                    if eur_usd > Decimal("0")
+                    else Decimal("0")
+                )
+
             cum_qty += tx.quantity
-            cum_cost += unit_cost * tx.quantity
-            cum_vwap = (cum_cost / cum_qty).quantize(PRICE_PRECISION, ROUND_HALF_UP) if cum_qty > Decimal("0") else Decimal("0")
+            cum_usd_cost += unit_cost_usd * tx.quantity
+            cum_eur_cost += unit_cost_eur * tx.quantity
+
+            cum_vwap = (cum_usd_cost / cum_qty).quantize(PRICE_PRECISION, ROUND_HALF_UP) if cum_qty > Decimal("0") else Decimal("0")
+            cum_vwap_eur = (cum_eur_cost / cum_qty).quantize(PRICE_PRECISION, ROUND_HALF_UP) if cum_qty > Decimal("0") else Decimal("0")
 
             buy_events.append(
                 DCABuyEvent(
                     executed_at=tx.executed_at,
                     quantity=tx.quantity,
-                    price_usd=unit_cost,
+                    price_usd=unit_cost_usd,
+                    price_eur=unit_cost_eur,
                     cumulative_quantity=cum_qty,
                     cumulative_vwap=cum_vwap,
+                    cumulative_vwap_eur=cum_vwap_eur,
                 )
             )
+
+        # VWAP EUR histórico total (mismo cálculo que el acumulado final)
+        vwap_eur = (cum_eur_cost / cum_qty).quantize(PRICE_PRECISION, ROUND_HALF_UP) if cum_qty > Decimal("0") else Decimal("0")
 
         return DCAAnalysis(
             asset=asset,
             current_price_usd=current_price,
             total_quantity=current_qty,
             vwap_usd=vwap,
+            vwap_eur=vwap_eur,
             cost_basis_usd=cost_basis,
             pnl_usd=pnl_usd,
             pnl_pct=pnl_pct,

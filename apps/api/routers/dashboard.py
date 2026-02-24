@@ -158,7 +158,9 @@ async def get_dca(
     current_price = prices.get(asset, Decimal("0"))
 
     service = PortfolioService(db=db, account_id=account.id)
-    dca = await service.calculate_dca_analysis(asset=asset, current_price=current_price)
+    dca = await service.calculate_dca_analysis(
+        asset=asset, current_price=current_price, eur_usd=eur_usd
+    )
 
     return ok(
         data={
@@ -167,7 +169,8 @@ async def get_dca(
             "current_price_eur": str(_to_eur(dca.current_price_usd, eur_usd)),
             "total_quantity": str(dca.total_quantity),
             "vwap_usd": str(dca.vwap_usd),
-            "vwap_eur": str(_to_eur(dca.vwap_usd, eur_usd)),
+            # vwap_eur calculado con precios históricos reales, no con tipo de cambio actual
+            "vwap_eur": str(dca.vwap_eur),
             "cost_basis_usd": str(dca.cost_basis_usd),
             "cost_basis_eur": str(_to_eur(dca.cost_basis_usd, eur_usd)),
             "pnl_usd": str(dca.pnl_usd),
@@ -179,10 +182,11 @@ async def get_dca(
                     "date": e.executed_at.isoformat(),
                     "quantity": str(e.quantity),
                     "price_usd": str(e.price_usd),
-                    "price_eur": str(_to_eur(e.price_usd, eur_usd)),
+                    # price_eur histórico: para BTCEUR es el precio real pagado en EUR
+                    "price_eur": str(e.price_eur),
                     "cumulative_quantity": str(e.cumulative_quantity),
                     "cumulative_vwap": str(e.cumulative_vwap),
-                    "cumulative_vwap_eur": str(_to_eur(e.cumulative_vwap, eur_usd)),
+                    "cumulative_vwap_eur": str(e.cumulative_vwap_eur),
                 }
                 for e in dca.buy_events
             ],
