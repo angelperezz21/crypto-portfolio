@@ -405,30 +405,58 @@ class BinanceClient:
     async def get_fiat_orders(
         self,
         transaction_type: int,
+        begin_time: int | None = None,
+        end_time: int | None = None,
         page: int = 1,
         rows: int = 500,
     ) -> dict:
         """
         GET /sapi/v1/fiat/orders
         transaction_type: 0 = depósito fiat, 1 = retiro fiat
+        beginTime/endTime: ventana máxima de 90 días.
         Paginación por page + rows (máx 500 por página).
+        Requiere permiso "Enable Fiat" en el API Key.
         """
         params: dict[str, Any] = {
             "transactionType": transaction_type,
             "page": page,
             "rows": rows,
         }
+        if begin_time is not None:
+            params["beginTime"] = begin_time
+        if end_time is not None:
+            params["endTime"] = end_time
         return await self._request("GET", "/sapi/v1/fiat/orders", params=params)
 
-    async def get_all_fiat_orders(self, transaction_type: int) -> AsyncIterator[list[dict]]:
-        """Itera todas las páginas de get_fiat_orders."""
-        page = 1
-        while True:
-            result = await self.get_fiat_orders(transaction_type=transaction_type, page=page)
-            data: list[dict] = result.get("data", [])
-            if not data:
-                break
-            yield data
-            if len(data) < 500:
-                break
-            page += 1
+    async def get_all_fiat_orders(
+        self,
+        transaction_type: int,
+        since_ms: int | None = None,
+    ) -> AsyncIterator[list[dict]]:
+        """
+        Itera depósitos/retiros fiat en ventanas de 90 días desde since_ms hasta ahora.
+        Binance requiere beginTime/endTime para recuperar historial completo.
+        Requiere permiso "Enable Fiat" en el API Key; si falta, la llamada lanza
+        BinanceAPIError que el caller puede capturar.
+        """
+        now_ms = int(time.time() * 1000)
+        window_start = since_ms if since_ms is not None else 0
+
+        while window_start < now_ms:
+            window_end = min(window_start + _90_DAYS_MS, now_ms)
+            page = 1
+            while True:
+                result = await self.get_fiat_orders(
+                    transaction_type=transaction_type,
+                    begin_time=window_start,
+                    end_time=window_end,
+                    page=page,
+                )
+                data: list[dict] = result.get("data", [])
+                if not data:
+                    break
+                yield data
+                if len(data) < 500:
+                    break
+                page += 1
+            window_start = window_end + 1

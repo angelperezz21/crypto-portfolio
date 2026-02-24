@@ -374,13 +374,37 @@ class SyncService:
     # -----------------------------------------------------------------------
 
     async def _sync_fiat(self, transaction_type: int) -> None:
-        """Sync de órdenes fiat (0=depósito, 1=retiro) con paginación."""
+        """
+        Sync de órdenes fiat (0=depósito, 1=retiro) con paginación por ventanas de 90 días.
+
+        IMPORTANTE: Requiere el permiso "Enable Fiat" en el API Key de Binance.
+        Si el API Key no tiene ese permiso, Binance devuelve -2015 (Invalid API-key)
+        y este step se omite con un warning en el log.
+        """
         tx_type = "deposit" if transaction_type == 0 else "withdrawal"
+        since_ms = await self._get_last_timestamp(tx_type) or self._HISTORY_START_MS
         total = 0
 
-        async for batch in self._client.get_all_fiat_orders(transaction_type):
-            rows = [self._map_fiat_order(item, tx_type) for item in batch]
-            total += await self._upsert_transactions(rows)
+        try:
+            async for batch in self._client.get_all_fiat_orders(
+                transaction_type, since_ms=since_ms
+            ):
+                rows = [self._map_fiat_order(item, tx_type) for item in batch]
+                total += await self._upsert_transactions(rows)
+        except BinanceAPIError as exc:
+            # -2015 = API-key sin permiso fiat; -1002 = no autorizado
+            if exc.code in (-2015, -1002, -2014):
+                logger.warning(
+                    "sync.fiat_permission_missing",
+                    transaction_type=transaction_type,
+                    error_code=exc.code,
+                    hint=(
+                        "El API Key necesita el permiso 'Enable Fiat' en Binance "
+                        "para importar el historial de transferencias bancarias."
+                    ),
+                )
+                return
+            raise
 
         await self.db.commit()
         self.stats.fiat_orders_saved += total

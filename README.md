@@ -82,7 +82,9 @@ Accede a [http://localhost:3000](http://localhost:3000) e inicia sesión con la 
 Después del primer login, ve a **Ajustes** y añade tus claves de API de Binance:
 
 - Ve a Binance → Gestión de API → Crear API
-- Permisos necesarios: **solo lectura** (Enable Reading)
+- Permisos necesarios:
+  - **Enable Reading** (obligatorio — balances, trades, depósitos cripto)
+  - **Enable Fiat** (necesario para ver el historial de transferencias bancarias)
 - No es necesario habilitar operaciones de trading ni retiros
 - Copia la API Key y el Secret Key en los ajustes de la aplicación
 
