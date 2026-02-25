@@ -64,7 +64,7 @@ export function OverviewContent() {
     : 0
 
   // ── Chart data (en EUR) ─────────────────────────────────────────────────────
-  const chartData = (overview?.evolution_30d ?? []).map((p) => ({
+  const chartData = (overview?.evolution_90d ?? []).map((p) => ({
     date:     p.date,
     value:    d(p.total_value_eur ?? p.total_value_usd),
     invested: investedEur,        // referencia plana al capital en EUR
@@ -174,8 +174,8 @@ export function OverviewContent() {
 
         </div>
 
-        {/* ── Gráfico de área 30d ───────────────────────────────────────── */}
-        <PortfolioChart data={chartData} investedTotal={investedEur} />
+        {/* ── Gráfico de área 90d ───────────────────────────────────────── */}
+        <PortfolioChart data={chartData} investedTotal={investedEur} title="Evolución del portafolio — 90 días" />
 
         {/* ── Tabla de activos ─────────────────────────────────────────── */}
         <AssetTable assets={assets ?? []} />

@@ -34,7 +34,7 @@ export interface OverviewData {
   irr_annual_pct: string | null
   eur_usd_rate: string
   top_assets: TopAsset[]
-  evolution_30d: EvolutionPoint[]
+  evolution_90d: EvolutionPoint[]
 }
 
 export interface OverviewMeta {
@@ -79,4 +79,61 @@ export interface SyncStatusData {
   sync_status: SyncStatus
   last_sync_at: string | null
   last_job: Record<string, unknown> | null
+}
+
+// ─── /api/v1/dashboard/btc-insights ──────────────────────────────────────────
+
+export interface BtcBuyEventRaw {
+  date: string
+  price_usd: string
+  quantity: string
+  total_usd: string
+}
+
+export interface BtcBestWorstBuy {
+  date: string
+  price_usd: string
+  quantity: string
+  gain_pct: string
+}
+
+export interface BtcStats {
+  total_buys: number
+  buys_in_profit: number
+  buys_in_profit_pct: string
+  date_first_buy: string | null
+  date_last_buy: string | null
+  best_buy: BtcBestWorstBuy | null
+  worst_buy: BtcBestWorstBuy | null
+}
+
+export interface BtcPricePoint {
+  date: string
+  price: string
+}
+
+export interface BtcHistogramBucket {
+  bucket_min: number
+  bucket_max: number
+  label: string
+  btc_quantity: string
+  buy_count: number
+}
+
+export interface BtcMonthlyCell {
+  year: number
+  month: number
+  total_usd: string
+  total_btc: string
+  buy_count: number
+}
+
+export interface BtcInsightsData {
+  current_price_usd: string
+  vwap_usd: string
+  stats: BtcStats
+  price_history: BtcPricePoint[]
+  buy_events: BtcBuyEventRaw[]
+  price_histogram: BtcHistogramBucket[]
+  monthly_heatmap: BtcMonthlyCell[]
 }

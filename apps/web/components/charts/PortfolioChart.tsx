@@ -15,13 +15,24 @@ interface ChartPoint {
 interface PortfolioChartProps {
   data:          ChartPoint[]
   investedTotal: number
+  title?:        string
 }
 
-export function PortfolioChart({ data, investedTotal }: PortfolioChartProps) {
+export function PortfolioChart({ data, investedTotal, title }: PortfolioChartProps) {
   const first = data[0]?.value ?? 0
   const last  = data[data.length - 1]?.value ?? 0
   const isPositive = last >= first
   const color = isPositive ? "#10b981" : "#ef4444"
+
+  // Detectar si el rango cubre más de un año para adaptar el eje X
+  const firstDate = data[0]?.date ? new Date(data[0].date) : null
+  const lastDate  = data[data.length - 1]?.date ? new Date(data[data.length - 1].date) : null
+  const spansMultipleYears =
+    firstDate && lastDate && firstDate.getFullYear() !== lastDate.getFullYear()
+
+  const xTickFormatter = spansMultipleYears
+    ? (d: string) => new Date(d).toLocaleDateString("es-ES", { month: "short", year: "2-digit" })
+    : (d: string) => new Date(d).toLocaleDateString("es-ES", { month: "short", day: "numeric" })
 
   if (data.length === 0) {
     return (
@@ -37,9 +48,9 @@ export function PortfolioChart({ data, investedTotal }: PortfolioChartProps) {
 
   return (
     <div className="bg-surface border border-[var(--border)] rounded-xl p-6">
-      <h2 className="text-sm font-medium text-secondary mb-4">
-        Evolución del portafolio — 30 días
-      </h2>
+      {title && (
+        <h2 className="text-sm font-medium text-secondary mb-4">{title}</h2>
+      )}
       <ResponsiveContainer width="100%" height={220}>
         <AreaChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
           <defs>
@@ -60,11 +71,7 @@ export function PortfolioChart({ data, investedTotal }: PortfolioChartProps) {
             tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(d) =>
-              new Date(d).toLocaleDateString("es-ES", {
-                month: "short", day: "numeric",
-              })
-            }
+            tickFormatter={xTickFormatter}
             interval="preserveStartEnd"
           />
 
@@ -125,7 +132,7 @@ function PortfolioTooltip({ active, payload, label }: any) {
                     shadow-xl text-xs space-y-1">
       <p className="text-secondary">
         {new Date(label).toLocaleDateString("es-ES", {
-          weekday: "short", day: "numeric", month: "long",
+          weekday: "short", day: "numeric", month: "long", year: "numeric",
         })}
       </p>
       <p className="text-primary font-semibold tabular-nums">

@@ -200,8 +200,9 @@ class SyncService:
     async def _sync_trades(self, symbols: list[str]) -> None:
         """
         Sync de trades por símbolo.
-        - Primera vez (sin trades en BD): descarga todo desde _HISTORY_START_MS.
-        - Syncs posteriores: paginación incremental por fromId.
+        - Sin trades en BD: descarga todo desde _HISTORY_START_MS.
+        - Con trades en BD pero gap anterior a _HISTORY_START_MS: backfill del gap primero.
+        - Siempre termina con sync incremental por fromId para capturar trades nuevos.
         """
         total = 0
         for symbol in symbols:
@@ -215,14 +216,36 @@ class SyncService:
                     symbol, start_time_ms=self._HISTORY_START_MS
                 ):
                     rows = [self._map_trade(t, symbol) for t in batch]
-                    saved = await self._upsert_transactions(rows)
-                    count += saved
+                    count += await self._upsert_transactions(rows)
             else:
-                # Sync incremental: solo trades nuevos desde el último ID
+                # Comprobar si falta historial anterior al primer trade conocido
+                first_dt = await self._get_first_trade_datetime(symbol)
+                if first_dt is not None:
+                    first_ms = int(first_dt.timestamp() * 1000)
+                    if first_ms > self._HISTORY_START_MS:
+                        logger.info(
+                            "sync.trades_backfill",
+                            symbol=symbol,
+                            from_ms=self._HISTORY_START_MS,
+                            to_ms=first_ms,
+                        )
+                        async for batch in self._client.get_all_trades_by_time(
+                            symbol, start_time_ms=self._HISTORY_START_MS
+                        ):
+                            # Solo trades estrictamente anteriores al primero ya almacenado
+                            pre_batch = [t for t in batch if int(t["time"]) < first_ms]
+                            if pre_batch:
+                                rows = [self._map_trade(t, symbol) for t in pre_batch]
+                                count += await self._upsert_transactions(rows)
+                            # Parar al alcanzar el historial ya conocido
+                            if int(batch[-1]["time"]) >= first_ms:
+                                break
+
+                # Sync incremental: trades nuevos desde el último ID conocido
+                logger.info("sync.trades_incremental", symbol=symbol, from_id=last_id)
                 async for batch in self._client.get_all_trades(symbol, from_id=last_id):
                     rows = [self._map_trade(t, symbol) for t in batch]
-                    saved = await self._upsert_transactions(rows)
-                    count += saved
+                    count += await self._upsert_transactions(rows)
 
             total += count
             logger.info("sync.trades_symbol_done", symbol=symbol, count=count)
@@ -246,6 +269,20 @@ class SyncService:
         )
         last = result.scalar_one_or_none()
         return int(last) + 1 if last else None
+
+    async def _get_first_trade_datetime(self, symbol: str) -> datetime | None:
+        """
+        Devuelve el datetime del trade más antiguo del par, o None.
+        Se usa para detectar si falta historial anterior a _HISTORY_START_MS.
+        """
+        result = await self.db.execute(
+            select(func.min(Transaction.executed_at)).where(
+                Transaction.account_id == self.account.id,
+                Transaction.type.in_(["buy", "sell"]),
+                Transaction.raw_data["symbol"].as_string() == symbol,
+            )
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
     def _parse_symbol(symbol: str) -> tuple[str, str]:
@@ -300,11 +337,10 @@ class SyncService:
     # -----------------------------------------------------------------------
 
     async def _sync_deposits(self) -> None:
-        """Sync incremental de depósitos BTC desde el último timestamp registrado."""
-        since_ms = await self._get_last_timestamp("deposit") or self._HISTORY_START_MS
+        """Sync de depósitos desde _HISTORY_START_MS. ON CONFLICT DO NOTHING garantiza idempotencia."""
         total = 0
 
-        async for batch in self._client.get_all_deposits(since_ms=since_ms):
+        async for batch in self._client.get_all_deposits(since_ms=self._HISTORY_START_MS):
             rows = [
                 self._map_deposit(d) for d in batch
                 if d.get("coin") in self._TRACKED_ASSETS
@@ -337,11 +373,10 @@ class SyncService:
     # -----------------------------------------------------------------------
 
     async def _sync_withdrawals(self) -> None:
-        """Sync incremental de retiros BTC desde el último timestamp registrado."""
-        since_ms = await self._get_last_timestamp("withdrawal") or self._HISTORY_START_MS
+        """Sync de retiros desde _HISTORY_START_MS. ON CONFLICT DO NOTHING garantiza idempotencia."""
         total = 0
 
-        async for batch in self._client.get_all_withdrawals(since_ms=since_ms):
+        async for batch in self._client.get_all_withdrawals(since_ms=self._HISTORY_START_MS):
             rows = [
                 self._map_withdrawal(w) for w in batch
                 if w.get("coin") in self._TRACKED_ASSETS
@@ -382,12 +417,11 @@ class SyncService:
         y este step se omite con un warning en el log.
         """
         tx_type = "deposit" if transaction_type == 0 else "withdrawal"
-        since_ms = await self._get_last_timestamp(tx_type) or self._HISTORY_START_MS
         total = 0
 
         try:
             async for batch in self._client.get_all_fiat_orders(
-                transaction_type, since_ms=since_ms
+                transaction_type, since_ms=self._HISTORY_START_MS
             ):
                 rows = [self._map_fiat_order(item, tx_type) for item in batch]
                 total += await self._upsert_transactions(rows)
@@ -438,45 +472,48 @@ class SyncService:
 
     async def _sync_prices(self) -> None:
         """
-        Descarga velas diarias de los pares BTC principales de los últimos 365 días
-        y las guarda en price_history (ON CONFLICT DO NOTHING para idempotencia).
+        Descarga velas diarias de BTCUSDT y EURUSDT desde _HISTORY_START_MS hasta hoy,
+        paginando en lotes de 1000. ON CONFLICT DO NOTHING garantiza idempotencia.
+        Cubre el historial completo necesario para enriquecer trades EUR históricos.
         """
         from sqlalchemy.dialects.postgresql import insert as pg_insert_ph
 
-        # BTCUSDT: 750 días (cubre desde ~feb 2024, necesario para "Todo" en Performance).
-        # EURUSDT: 550 días (cubre desde sept 2024, conversión trades BTCEUR→USD en FIFO).
-        price_symbols = [("BTCUSDT", 750), ("EURUSDT", 550)]
+        price_symbols = ["BTCUSDT", "EURUSDT"]
         total = 0
 
-        for sym, limit in price_symbols:
+        for sym in price_symbols:
+            sym_count = 0
             try:
-                klines = await self._client.get_klines(sym, "1d", limit=limit)
-            except Exception:
-                continue
-            if not klines:
+                async for batch in self._client.get_all_klines(
+                    sym, "1d", start_time_ms=self._HISTORY_START_MS
+                ):
+                    rows = [
+                        {
+                            "symbol":   sym,
+                            "interval": "1d",
+                            "open_at":  datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc),
+                            "open":     Decimal(str(k[1])),
+                            "high":     Decimal(str(k[2])),
+                            "low":      Decimal(str(k[3])),
+                            "close":    Decimal(str(k[4])),
+                            "volume":   Decimal(str(k[5])),
+                        }
+                        for k in batch
+                    ]
+                    stmt = pg_insert_ph(PriceHistory).values(rows)
+                    stmt = stmt.on_conflict_do_nothing(
+                        index_elements=["symbol", "interval", "open_at"]
+                    )
+                    await self.db.execute(stmt)
+                    await self.db.commit()
+                    sym_count += len(rows)
+            except Exception as exc:
+                logger.warning("sync.prices_symbol_error", symbol=sym, error=str(exc))
                 continue
 
-            rows = [
-                {
-                    "symbol":   sym,
-                    "interval": "1d",
-                    "open_at":  datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc),
-                    "open":     Decimal(str(k[1])),
-                    "high":     Decimal(str(k[2])),
-                    "low":      Decimal(str(k[3])),
-                    "close":    Decimal(str(k[4])),
-                    "volume":   Decimal(str(k[5])),
-                }
-                for k in klines
-            ]
-            stmt = pg_insert_ph(PriceHistory).values(rows)
-            stmt = stmt.on_conflict_do_nothing(
-                index_elements=["symbol", "interval", "open_at"]
-            )
-            await self.db.execute(stmt)
-            total += len(rows)
+            total += sym_count
+            logger.info("sync.prices_symbol_done", symbol=sym, count=sym_count)
 
-        await self.db.commit()
         logger.info("sync.prices_done", count=total)
 
     # -----------------------------------------------------------------------
@@ -532,22 +569,6 @@ class SyncService:
     # -----------------------------------------------------------------------
     # Helpers de base de datos
     # -----------------------------------------------------------------------
-
-    async def _get_last_timestamp(self, tx_type: str) -> int | None:
-        """
-        Devuelve el timestamp (epoch ms) de la transacción más reciente
-        del tipo dado para esta cuenta, o None si no hay ninguna.
-        """
-        result = await self.db.execute(
-            select(func.max(Transaction.executed_at)).where(
-                Transaction.account_id == self.account.id,
-                Transaction.type == tx_type,
-            )
-        )
-        last_dt: datetime | None = result.scalar_one_or_none()
-        if last_dt is None:
-            return None
-        return int(last_dt.timestamp() * 1000)
 
     async def _upsert_transactions(self, rows: list[dict]) -> int:
         """

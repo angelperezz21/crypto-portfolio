@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   TrendingUp,
   Bitcoin,
+  Zap,
   ArrowLeftRight,
   Settings,
 } from "lucide-react"
@@ -15,6 +16,7 @@ const MOBILE_ITEMS = [
   { href: "/",             icon: LayoutDashboard, label: "Overview"  },
   { href: "/performance",  icon: TrendingUp,      label: "Charts"    },
   { href: "/dca",          icon: Bitcoin,         label: "DCA"       },
+  { href: "/btc",          icon: Zap,             label: "BTC"       },
   { href: "/transactions", icon: ArrowLeftRight,  label: "Historial" },
   { href: "/settings",     icon: Settings,        label: "Ajustes"   },
 ]
@@ -34,7 +36,7 @@ export function BottomNav() {
             key={item.href}
             href={item.href}
             className={cn(
-              "flex flex-col items-center gap-0.5 px-3 py-2 rounded-lg transition-colors",
+              "flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg transition-colors",
               isActive ? "text-primary" : "text-tertiary hover:text-secondary",
             )}
           >

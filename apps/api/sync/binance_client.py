@@ -263,6 +263,30 @@ class BinanceClient:
             params["endTime"] = end_time
         return await self._request("GET", "/api/v3/klines", signed=False, params=params)
 
+    async def get_all_klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time_ms: int = 0,
+    ) -> AsyncIterator[list[list]]:
+        """
+        Descarga velas históricas desde start_time_ms paginando en lotes de 1000.
+        Usa closeTime (índice 6) de la última vela para avanzar la ventana.
+        Yield: lotes de hasta 1000 velas.
+        """
+        current_start = start_time_ms
+        now_ms = int(time.time() * 1000)
+
+        while current_start < now_ms:
+            batch = await self.get_klines(symbol, interval, start_time=current_start, limit=1000)
+            if not batch:
+                break
+            yield batch
+            if len(batch) < 1000:
+                break
+            # Avanzar al ms siguiente al closeTime de la última vela (índice 6)
+            current_start = int(batch[-1][6]) + 1
+
     # -----------------------------------------------------------------------
     # Endpoints privados — balances y trades
     # -----------------------------------------------------------------------

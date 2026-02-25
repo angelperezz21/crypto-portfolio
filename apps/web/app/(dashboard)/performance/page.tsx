@@ -139,7 +139,11 @@ export default function PerformancePage() {
               <p className="text-tertiary text-xs mt-1">{error}</p>
             </div>
           )
-          : <PortfolioChart data={chartData} investedTotal={chartData[0]?.invested ?? 0} />
+          : <PortfolioChart
+              data={chartData}
+              investedTotal={chartData[0]?.invested ?? 0}
+              title={`Evolución del portafolio — ${range.label}`}
+            />
         }
 
       </div>

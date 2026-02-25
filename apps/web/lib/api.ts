@@ -100,3 +100,7 @@ export async function fetchLiquidBalance() {
     items: { asset: string; quantity: string; value_usd: string }[]
   }>("/api/v1/portfolio/liquid")
 }
+
+export async function fetchBtcInsights() {
+  return apiFetch<import("./types").BtcInsightsData>("/api/v1/dashboard/btc-insights")
+}
