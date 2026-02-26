@@ -88,6 +88,7 @@ export interface BtcBuyEventRaw {
   price_usd: string
   quantity: string
   total_usd: string
+  timing_pct: string | null
 }
 
 export interface BtcBestWorstBuy {
@@ -110,6 +111,8 @@ export interface BtcStats {
 export interface BtcPricePoint {
   date: string
   price: string
+  ma50: string | null
+  ma200: string | null
 }
 
 export interface BtcHistogramBucket {
@@ -128,12 +131,53 @@ export interface BtcMonthlyCell {
   buy_count: number
 }
 
+export interface BtcTimingDistribution {
+  q1: number  // 0-25% (dip buyer)
+  q2: number  // 25-50%
+  q3: number  // 50-75%
+  q4: number  // 75-100% (FOMO)
+}
+
+export interface BtcTimingAnalysis {
+  avg_percentile: string | null
+  label: string
+  distribution: BtcTimingDistribution
+  buys_below_ma200: number
+  buys_above_ma200: number
+}
+
 export interface BtcInsightsData {
   current_price_usd: string
   vwap_usd: string
   stats: BtcStats
+  timing_analysis: BtcTimingAnalysis
   price_history: BtcPricePoint[]
   buy_events: BtcBuyEventRaw[]
   price_histogram: BtcHistogramBucket[]
   monthly_heatmap: BtcMonthlyCell[]
+}
+
+// ─── /api/v1/dashboard/btc-insights/dca-simulation ───────────────────────────
+
+export interface DcaCurvePoint {
+  date: string
+  btc_accumulated: string
+}
+
+export interface DcaSimulationSummary {
+  total_invested_usd: string
+  real_btc: string
+  simulated_btc: string
+  diff_btc: string
+  diff_pct: string
+  diff_value_usd: string
+  diff_value_eur: string
+  interval: string
+  periods_simulated: number
+}
+
+export interface DcaSimulationData {
+  real: DcaCurvePoint[]
+  simulated: DcaCurvePoint[]
+  summary: DcaSimulationSummary
 }

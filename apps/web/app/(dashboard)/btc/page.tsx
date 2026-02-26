@@ -7,14 +7,20 @@ import { MetricCard, MetricCardSkeleton } from "@/components/dashboard/MetricCar
 import { BtcPriceChart, BtcPriceChartSkeleton } from "@/components/charts/BtcPriceChart"
 import { BtcHistogram, BtcHistogramSkeleton } from "@/components/charts/BtcHistogram"
 import { BtcHeatmap, BtcHeatmapSkeleton } from "@/components/dashboard/BtcHeatmap"
-import { fetchBtcInsights } from "@/lib/api"
+import { TimingScore, TimingScoreSkeleton } from "@/components/dashboard/TimingScore"
+import { DcaSimulation, DcaSimulationSkeleton } from "@/components/charts/DcaSimulation"
+import { BuyScatter, BuyScatterSkeleton } from "@/components/charts/BuyScatter"
+import { fetchBtcInsights, fetchDcaSimulation } from "@/lib/api"
 import { d, formatCurrency, formatPercent } from "@/lib/formatters"
-import type { BtcInsightsData } from "@/lib/types"
+import type { BtcInsightsData, DcaSimulationData } from "@/lib/types"
 
 export default function BtcInsightsPage() {
-  const [data,    setData]    = useState<BtcInsightsData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState<string | null>(null)
+  const [data,        setData]        = useState<BtcInsightsData | null>(null)
+  const [simData,     setSimData]     = useState<DcaSimulationData | null>(null)
+  const [simInterval, setSimInterval] = useState<"weekly" | "monthly">("weekly")
+  const [simLoading,  setSimLoading]  = useState(false)
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState<string | null>(null)
 
   useEffect(() => {
     fetchBtcInsights()
@@ -22,6 +28,14 @@ export default function BtcInsightsPage() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    setSimLoading(true)
+    fetchDcaSimulation(simInterval)
+      .then((res) => setSimData(res.data))
+      .catch(() => {/* silencioso */})
+      .finally(() => setSimLoading(false))
+  }, [simInterval])
 
   const stats         = data?.stats
   const inProfitPct   = d(stats?.buys_in_profit_pct)
@@ -47,11 +61,23 @@ export default function BtcInsightsPage() {
 
       <div className="p-4 lg:p-6 space-y-4">
 
-        {/* Metric cards */}
+        {/* ── Estado vacío / error ──────────────────────────────────────────── */}
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-            {[0, 1, 2, 3].map((i) => <MetricCardSkeleton key={i} />)}
-          </div>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              {[0, 1, 2, 3].map((i) => <MetricCardSkeleton key={i} />)}
+            </div>
+            <BtcPriceChartSkeleton />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <TimingScoreSkeleton />
+              <BuyScatterSkeleton />
+            </div>
+            <DcaSimulationSkeleton />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <BtcHistogramSkeleton />
+              <BtcHeatmapSkeleton />
+            </div>
+          </>
         ) : error ? (
           <div className="bg-surface border border-[var(--border)] rounded-xl p-8
                           flex flex-col items-center justify-center">
@@ -69,6 +95,7 @@ export default function BtcInsightsPage() {
           </div>
         ) : (
           <>
+            {/* ── Metric cards ─────────────────────────────────────────────── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <MetricCard
                 label="Compras en beneficio"
@@ -103,7 +130,7 @@ export default function BtcInsightsPage() {
               />
             </div>
 
-            {/* Price chart */}
+            {/* ── Gráfico de precio + MA50/MA200 + compras ─────────────────── */}
             <BtcPriceChart
               priceHistory={data?.price_history ?? []}
               buyEvents={data?.buy_events ?? []}
@@ -111,7 +138,34 @@ export default function BtcInsightsPage() {
               currentPriceUsd={currentPrice}
             />
 
-            {/* Histogram + Heatmap */}
+            {/* ── Timing score + Scatter plot ───────────────────────────────── */}
+            {data?.timing_analysis && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <TimingScore
+                  timing={data.timing_analysis}
+                  totalBuys={totalBuys}
+                />
+                <BuyScatter
+                  buyEvents={data.buy_events ?? []}
+                  currentPriceUsd={currentPrice}
+                  vwapUsd={vwap}
+                />
+              </div>
+            )}
+
+            {/* ── DCA real vs simulado ──────────────────────────────────────── */}
+            {simLoading ? (
+              <DcaSimulationSkeleton />
+            ) : simData && simData.real.length > 0 ? (
+              <DcaSimulation
+                data={simData}
+                interval={simInterval}
+                onIntervalChange={setSimInterval}
+                loading={simLoading}
+              />
+            ) : null}
+
+            {/* ── Histograma + Heatmap ──────────────────────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <BtcHistogram
                 data={data?.price_histogram ?? []}

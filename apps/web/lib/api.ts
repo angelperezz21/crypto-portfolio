@@ -105,3 +105,9 @@ export async function fetchLiquidBalance() {
 export async function fetchBtcInsights() {
   return apiFetch<import("./types").BtcInsightsData>("/api/v1/dashboard/btc-insights")
 }
+
+export async function fetchDcaSimulation(interval: "weekly" | "monthly" = "weekly") {
+  return apiFetch<import("./types").DcaSimulationData>(
+    `/api/v1/dashboard/btc-insights/dca-simulation?interval=${interval}`
+  )
+}

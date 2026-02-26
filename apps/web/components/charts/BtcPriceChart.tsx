@@ -10,6 +10,7 @@ import {
   Tooltip,
   ReferenceLine,
   ResponsiveContainer,
+  Legend,
 } from "recharts"
 import type { BtcBuyEventRaw, BtcPricePoint } from "@/lib/types"
 import { d } from "@/lib/formatters"
@@ -24,6 +25,8 @@ interface BtcPriceChartProps {
 interface LinePoint {
   ts: number
   price: number
+  ma50?: number
+  ma200?: number
 }
 
 interface ScatterPoint {
@@ -31,6 +34,7 @@ interface ScatterPoint {
   price: number
   quantity: number
   total_usd: number
+  timing_pct: number | null
 }
 
 function formatPrice(v: number): string {
@@ -55,6 +59,8 @@ export function BtcPriceChart({
   const lineData: LinePoint[] = priceHistory.map((p) => ({
     ts: new Date(p.date).getTime(),
     price: d(p.price),
+    ...(p.ma50 != null ? { ma50: d(p.ma50) } : {}),
+    ...(p.ma200 != null ? { ma200: d(p.ma200) } : {}),
   }))
 
   const quantities = buyEvents.map((e) => d(e.quantity))
@@ -65,6 +71,7 @@ export function BtcPriceChart({
     price: d(e.price_usd),
     quantity: d(e.quantity),
     total_usd: d(e.total_usd),
+    timing_pct: e.timing_pct != null ? d(e.timing_pct) : null,
   }))
 
   const allPrices = lineData.map((p) => p.price).filter((p) => p > 0)
@@ -101,17 +108,25 @@ export function BtcPriceChart({
             Precio
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#3b82f6] inline-block" />
+            <span className="w-4 h-0.5 bg-[#3b82f6] inline-block" />
+            MA50
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-0.5 bg-[#a855f7] inline-block" />
+            MA200
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e] inline-block" />
             Compra
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-4 h-0.5 bg-[var(--text-tertiary)] border-dashed border-t-2 inline-block" />
+            <span className="w-4 h-0.5 border-dashed border-t-2 border-[var(--text-tertiary)] inline-block" />
             VWAP
           </span>
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={300}>
         <ComposedChart margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
           <CartesianGrid
             strokeDasharray="3 3"
@@ -161,6 +176,7 @@ export function BtcPriceChart({
             />
           )}
 
+          {/* Precio BTC */}
           <Line
             data={lineData}
             dataKey="price"
@@ -171,31 +187,81 @@ export function BtcPriceChart({
             activeDot={false}
           />
 
+          {/* MA50 */}
+          <Line
+            data={lineData}
+            dataKey="ma50"
+            type="monotone"
+            stroke="#3b82f6"
+            strokeWidth={1}
+            dot={false}
+            activeDot={false}
+            strokeOpacity={0.8}
+            connectNulls={false}
+          />
+
+          {/* MA200 */}
+          <Line
+            data={lineData}
+            dataKey="ma200"
+            type="monotone"
+            stroke="#a855f7"
+            strokeWidth={1.5}
+            dot={false}
+            activeDot={false}
+            strokeOpacity={0.9}
+            connectNulls={false}
+          />
+
+          {/* Puntos de compra */}
           <Scatter
             data={scatterData}
             dataKey="price"
-            fill="#3b82f6"
             shape={(props: any) => {
               const { cx, cy, payload } = props
-              const r =
-                maxQty > 0
-                  ? 5 + (payload.quantity / maxQty) * 7
-                  : 6
+              const r = maxQty > 0 ? 5 + (payload.quantity / maxQty) * 7 : 6
+              // Color basado en timing: verde=buen timing, naranja=neutral, rojo=FOMO
+              const tp = payload.timing_pct
+              const fill =
+                tp === null
+                  ? "#22c55e"
+                  : tp <= 33
+                  ? "#22c55e"   // dip buyer — verde
+                  : tp <= 66
+                  ? "#f59e0b"   // neutral — ámbar
+                  : "#ef4444"   // FOMO — rojo
               return (
                 <circle
                   cx={cx}
                   cy={cy}
                   r={r}
-                  fill="#3b82f6"
-                  fillOpacity={0.75}
-                  stroke="#1d4ed8"
+                  fill={fill}
+                  fillOpacity={0.8}
+                  stroke={fill}
                   strokeWidth={1}
+                  strokeOpacity={0.4}
                 />
               )
             }}
           />
         </ComposedChart>
       </ResponsiveContainer>
+
+      {/* Leyenda timing color */}
+      <div className="flex items-center gap-4 mt-3 text-xs text-tertiary justify-end">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-[#22c55e] inline-block" />
+          Dip (0-33%)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-[#f59e0b] inline-block" />
+          Neutral (33-66%)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-[#ef4444] inline-block" />
+          FOMO (66-100%)
+        </span>
+      </div>
     </div>
   )
 }
@@ -207,6 +273,18 @@ function PriceChartTooltip({ active, payload, maxQty }: any) {
   const isScatter = "quantity" in point
 
   if (isScatter) {
+    const tp = point.timing_pct
+    const timingLabel =
+      tp === null ? null
+      : tp <= 33 ? `Dip buyer (${tp.toFixed(0)}%)`
+      : tp <= 66 ? `Neutral (${tp.toFixed(0)}%)`
+      : `FOMO (${tp.toFixed(0)}%)`
+    const timingColor =
+      tp === null ? "text-tertiary"
+      : tp <= 33 ? "text-green-400"
+      : tp <= 66 ? "text-amber-400"
+      : "text-red-400"
+
     return (
       <div className="bg-elevated border border-[var(--border)] rounded-lg p-3
                       shadow-xl text-xs space-y-1">
@@ -221,6 +299,11 @@ function PriceChartTooltip({ active, payload, maxQty }: any) {
         <p className="text-tertiary tabular-nums">
           Total: ${point.total_usd.toFixed(2)}
         </p>
+        {timingLabel && (
+          <p className={`tabular-nums font-medium ${timingColor}`}>
+            Timing: {timingLabel}
+          </p>
+        )}
       </div>
     )
   }
@@ -228,10 +311,20 @@ function PriceChartTooltip({ active, payload, maxQty }: any) {
   return (
     <div className="bg-elevated border border-[var(--border)] rounded-lg p-3
                     shadow-xl text-xs space-y-1">
-      <p className="text-secondary">{formatDate(point.ts)}</p>
+      <p className="text-tertiary">{formatDate(point.ts)}</p>
       <p className="text-primary tabular-nums font-semibold">
         ${point.price.toLocaleString("es-ES", { maximumFractionDigits: 0 })}
       </p>
+      {point.ma50 != null && (
+        <p className="text-[#3b82f6] tabular-nums text-[10px]">
+          MA50: ${point.ma50.toLocaleString("es-ES", { maximumFractionDigits: 0 })}
+        </p>
+      )}
+      {point.ma200 != null && (
+        <p className="text-[#a855f7] tabular-nums text-[10px]">
+          MA200: ${point.ma200.toLocaleString("es-ES", { maximumFractionDigits: 0 })}
+        </p>
+      )}
     </div>
   )
 }
@@ -240,7 +333,7 @@ export function BtcPriceChartSkeleton() {
   return (
     <div className="bg-surface border border-[var(--border)] rounded-xl p-6 animate-pulse">
       <div className="h-4 bg-elevated rounded w-64 mb-6" />
-      <div className="h-[280px] bg-elevated rounded-lg" />
+      <div className="h-[300px] bg-elevated rounded-lg" />
     </div>
   )
 }
