@@ -179,18 +179,23 @@ async def get_liquid_balance(
         else:
             value_usd = Decimal("0")
         total_usd += value_usd
+        value_eur = (value_usd / eur_usd).quantize(Decimal("0.01"))
         items.append({
             "asset":     snap.asset,
             "quantity":  str(qty),
             "value_usd": str(value_usd.quantize(Decimal("0.01"))),
+            "value_eur": str(value_eur),
         })
 
     # Ordenar por valor descendente
     items.sort(key=lambda x: Decimal(x["value_usd"]), reverse=True)
 
+    total_eur = (total_usd / eur_usd).quantize(Decimal("0.01"))
+
     return ok(
         data={
             "total_liquid_usd": str(total_usd.quantize(Decimal("0.01"))),
+            "total_liquid_eur": str(total_eur),
             "items": items,
         }
     )

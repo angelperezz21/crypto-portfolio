@@ -97,7 +97,8 @@ export async function triggerSync() {
 export async function fetchLiquidBalance() {
   return apiFetch<{
     total_liquid_usd: string
-    items: { asset: string; quantity: string; value_usd: string }[]
+    total_liquid_eur: string
+    items: { asset: string; quantity: string; value_usd: string; value_eur: string }[]
   }>("/api/v1/portfolio/liquid")
 }
 

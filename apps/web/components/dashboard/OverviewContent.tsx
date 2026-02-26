@@ -12,8 +12,8 @@ import { fetchOverview, fetchAssets, fetchLiquidBalance } from "@/lib/api"
 import { formatCurrency, formatPercent, d } from "@/lib/formatters"
 import type { OverviewData, OverviewMeta, AssetMetric } from "@/lib/types"
 
-type LiquidItem = { asset: string; quantity: string; value_usd: string }
-type LiquidData = { total_liquid_usd: string; items: LiquidItem[] }
+type LiquidItem = { asset: string; quantity: string; value_usd: string; value_eur: string }
+type LiquidData = { total_liquid_usd: string; total_liquid_eur: string; items: LiquidItem[] }
 
 export function OverviewContent() {
   const [overview, setOverview] = useState<OverviewData | null>(null)
@@ -110,10 +110,10 @@ export function OverviewContent() {
     )
   }
 
-  const liquidTotal  = d(liquid?.total_liquid_usd)
+  const liquidTotal  = d(liquid?.total_liquid_eur)
   const liquidItems  = liquid?.items ?? []
   const liquidDelta  = liquidItems.length > 0
-    ? liquidItems.map(i => `${i.asset} ${formatCurrency(d(i.value_usd))}`).join(" · ")
+    ? liquidItems.map(i => `${i.asset} ${formatCurrency(d(i.value_eur), "EUR")}`).join(" · ")
     : undefined
 
   // ── Data state ───────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ export function OverviewContent() {
 
           <MetricCard
             label="Saldo líquido en Binance"
-            value={formatCurrency(liquidTotal)}
+            value={formatCurrency(liquidTotal, "EUR")}
             delta={liquidDelta}
             icon={Wallet}
           />
