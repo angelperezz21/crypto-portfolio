@@ -11,7 +11,6 @@ import {
   Settings,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { SyncIndicator } from "./SyncIndicator"
 
 const NAV_ITEMS = [
   { href: "/",             icon: LayoutDashboard, label: "Overview"       },
@@ -62,10 +61,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Sync status */}
-      <div className="px-3 pb-4">
-        <SyncIndicator />
-      </div>
     </aside>
   )
 }

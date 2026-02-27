@@ -81,7 +81,9 @@ class AssetMetrics:
 class PortfolioOverview:
     total_value_usd: Decimal
     invested_usd: Decimal
+    invested_eur: Decimal          # calculado directo en EUR, sin doble conversión
     total_deposited_usd: Decimal   # gross aportado + comisiones (sin descontar retiros)
+    total_deposited_eur: Decimal   # ídem, calculado directo en EUR
     fees_usd: Decimal              # total comisiones pagadas en USD
     pnl_unrealized_usd: Decimal
     pnl_realized_usd: Decimal
@@ -109,7 +111,9 @@ class DCAAnalysis:
     vwap_usd: Decimal            # precio promedio ponderado en USD
     vwap_eur: Decimal            # precio promedio ponderado en EUR histórico
     cost_basis_usd: Decimal
+    cost_basis_eur: Decimal      # EUR histórico: tx.price para BTCEUR, aprox para BTCUSDT
     pnl_usd: Decimal
+    pnl_eur: Decimal             # value_eur - cost_basis_eur (sin doble conversión)
     pnl_pct: Decimal
     total_events: int
     buy_events: list[DCABuyEvent]
@@ -120,6 +124,7 @@ class PerformancePoint:
     snapshot_date: date
     total_value_usd: Decimal
     invested_usd: Decimal
+    invested_eur: Decimal        # calculado directo en EUR, sin doble conversión
     pnl_usd: Decimal
     pnl_pct: Decimal             # (pnl / invested) * 100
 
@@ -479,6 +484,53 @@ class PortfolioService:
         return total.quantize(PRICE_PRECISION, ROUND_HALF_UP)
 
     @staticmethod
+    def _compute_invested_eur(txns: list[Transaction], eur_usd: Decimal) -> Decimal:
+        """
+        Capital invertido en EUR sin doble conversión EUR→USD→EUR.
+
+        El error clásico: total_value_usd se generó con el tipo histórico;
+        dividirlo por el tipo actual da un EUR distinto al que se gastó realmente.
+
+        Reglas:
+        - Quote EUR  → price × quantity  (exacto, ya está en EUR)
+        - Quote USD/stablecoin → total_value_usd / eur_usd  (aproximado pero aceptable)
+        - Retiros fiat EUR → resta price × quantity
+        - Retiros fiat USD → resta total_value_usd / eur_usd
+        """
+        invested = Decimal("0")
+        for tx in txns:
+            if tx.type in ("deposit", "buy"):
+                if tx.quote_asset == "EUR" and tx.price is not None:
+                    invested += tx.price * tx.quantity
+                elif tx.total_value_usd is not None and eur_usd > Decimal("0"):
+                    invested += tx.total_value_usd / eur_usd
+                elif tx.price is not None:
+                    invested += tx.price * tx.quantity  # fallback
+            elif tx.type == "withdrawal" and tx.base_asset in FIAT_AND_STABLECOINS:
+                if tx.base_asset == "EUR" and tx.price is not None:
+                    invested -= tx.price * tx.quantity
+                elif tx.total_value_usd is not None and eur_usd > Decimal("0"):
+                    invested -= tx.total_value_usd / eur_usd
+        return invested.quantize(PRICE_PRECISION, ROUND_HALF_UP)
+
+    @staticmethod
+    def _compute_gross_invested_eur(txns: list[Transaction], eur_usd: Decimal) -> Decimal:
+        """
+        Total bruto aportado en EUR, sin descontar retiros.
+        Misma lógica que _compute_invested_eur pero sin la resta de retiros fiat.
+        """
+        total = Decimal("0")
+        for tx in txns:
+            if tx.type in ("deposit", "buy"):
+                if tx.quote_asset == "EUR" and tx.price is not None:
+                    total += tx.price * tx.quantity
+                elif tx.total_value_usd is not None and eur_usd > Decimal("0"):
+                    total += tx.total_value_usd / eur_usd
+                elif tx.price is not None:
+                    total += tx.price * tx.quantity
+        return total.quantize(PRICE_PRECISION, ROUND_HALF_UP)
+
+    @staticmethod
     def _compute_fees_usd(
         txns: list[Transaction],
         prices: dict[str, Decimal],
@@ -610,12 +662,18 @@ class PortfolioService:
             PRICE_PRECISION, ROUND_HALF_UP
         )
 
+        eur_usd = current_prices.get("EUR", Decimal("1.08"))
         invested_usd = self._compute_invested(all_txns)
+        invested_eur = self._compute_invested_eur(all_txns, eur_usd)
         fees_usd = self._compute_fees_usd(all_txns, current_prices)
         gross_invested_usd = self._compute_gross_invested(all_txns)
+        gross_invested_eur = self._compute_gross_invested_eur(all_txns, eur_usd)
         total_deposited_usd = (gross_invested_usd + fees_usd).quantize(
             PRICE_PRECISION, ROUND_HALF_UP
         )
+        total_deposited_eur = (
+            gross_invested_eur + (fees_usd / eur_usd if eur_usd > Decimal("0") else Decimal("0"))
+        ).quantize(PRICE_PRECISION, ROUND_HALF_UP)
 
         roi_pct = (
             ((total_value_usd - invested_usd) / invested_usd * Decimal("100")).quantize(
@@ -652,7 +710,9 @@ class PortfolioService:
         return PortfolioOverview(
             total_value_usd=total_value_usd,
             invested_usd=invested_usd,
+            invested_eur=invested_eur,
             total_deposited_usd=total_deposited_usd,
+            total_deposited_eur=total_deposited_eur,
             fees_usd=fees_usd,
             pnl_unrealized_usd=pnl_unrealized,
             pnl_realized_usd=total_realized.quantize(PRICE_PRECISION, ROUND_HALF_UP),
@@ -678,7 +738,7 @@ class PortfolioService:
         buys = [t for t in txns if t.type in {"buy", "deposit"} and t.price is not None]
         sells = [t for t in txns if t.type in SELL_TYPES]
 
-        fifo = compute_fifo(buys, sells)
+        fifo = compute_fifo(buys, sells, eur_usd=eur_usd)
         vwap = compute_vwap(buys)
 
         # Cantidad actual: usar balance real de Binance si está disponible,
@@ -688,12 +748,19 @@ class PortfolioService:
         total_sold = sum((t.quantity for t in sells), Decimal("0"))
         current_qty = balances.get(asset, total_bought - total_sold)
 
-        cost_basis = fifo.cost_basis
+        cost_basis_usd = fifo.cost_basis
+        cost_basis_eur = fifo.cost_basis_eur
         value_usd = (current_qty * current_price).quantize(PRICE_PRECISION, ROUND_HALF_UP)
-        pnl_usd = (value_usd - cost_basis).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+        value_eur = (
+            (value_usd / eur_usd).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+            if eur_usd > Decimal("0") else Decimal("0")
+        )
+        pnl_usd = (value_usd - cost_basis_usd).quantize(PRICE_PRECISION, ROUND_HALF_UP)
+        # pnl_eur: valor actual en EUR - coste base EUR histórico (sin doble conversión)
+        pnl_eur = (value_eur - cost_basis_eur).quantize(PRICE_PRECISION, ROUND_HALF_UP)
         pnl_pct = (
-            (pnl_usd / cost_basis * Decimal("100")).quantize(PCT_PRECISION, ROUND_HALF_UP)
-            if cost_basis > Decimal("0")
+            (pnl_usd / cost_basis_usd * Decimal("100")).quantize(PCT_PRECISION, ROUND_HALF_UP)
+            if cost_basis_usd > Decimal("0")
             else Decimal("0")
         )
 
@@ -750,8 +817,10 @@ class PortfolioService:
             total_quantity=current_qty,
             vwap_usd=vwap,
             vwap_eur=vwap_eur,
-            cost_basis_usd=cost_basis,
+            cost_basis_usd=cost_basis_usd,
+            cost_basis_eur=cost_basis_eur,
             pnl_usd=pnl_usd,
+            pnl_eur=pnl_eur,
             pnl_pct=pnl_pct,
             total_events=len(buy_events),
             buy_events=buy_events,
@@ -761,6 +830,7 @@ class PortfolioService:
         self,
         from_date: date,
         to_date: date,
+        eur_usd: Decimal = Decimal("1.08"),
     ) -> list[PerformancePoint]:
         """
         Serie temporal diaria de valor del portafolio.
@@ -786,6 +856,13 @@ class PortfolioService:
                         snapshot_date=snap.snapshot_date,
                         total_value_usd=snap.total_value_usd,
                         invested_usd=snap.invested_usd,
+                        # Snapshots solo guardan USD: convertimos con tipo actual
+                        # (aceptable hasta que el scheduler almacene invested_eur)
+                        invested_eur=(
+                            snap.invested_usd / eur_usd
+                            if eur_usd > Decimal("0")
+                            else snap.invested_usd
+                        ).quantize(PRICE_PRECISION, ROUND_HALF_UP),
                         pnl_usd=pnl_usd.quantize(PRICE_PRECISION, ROUND_HALF_UP),
                         pnl_pct=pnl_pct,
                     )
@@ -793,12 +870,13 @@ class PortfolioService:
             return points
 
         # Sin snapshots: generar desde price_history + transacciones
-        return await self._synthetic_performance_history(from_date, to_date)
+        return await self._synthetic_performance_history(from_date, to_date, eur_usd)
 
     async def _synthetic_performance_history(
         self,
         from_date: date,
         to_date: date,
+        eur_usd: Decimal = Decimal("1.08"),
     ) -> list[PerformancePoint]:
         """
         Genera la serie temporal del portafolio desde price_history de BTCUSDT
@@ -852,7 +930,8 @@ class PortfolioService:
 
         # Acumuladores
         cum_qty = Decimal("0")
-        cum_invested = Decimal("0")
+        cum_invested = Decimal("0")      # en USD (para pnl_usd y pnl_pct)
+        cum_invested_eur = Decimal("0")  # en EUR directo, sin doble conversión
         tx_idx = 0
         n_txns = len(txns)
 
@@ -870,6 +949,13 @@ class PortfolioService:
                 if tx.type in ("buy", "deposit"):
                     cum_qty += tx.quantity
                     cum_invested += val
+                    # EUR directo: evita el error de doble conversión EUR→USD→EUR
+                    if tx.quote_asset == "EUR" and tx.price is not None:
+                        cum_invested_eur += tx.price * tx.quantity
+                    elif tx.total_value_usd is not None and eur_usd > Decimal("0"):
+                        cum_invested_eur += tx.total_value_usd / eur_usd
+                    elif tx.price is not None:
+                        cum_invested_eur += tx.price * tx.quantity
                 elif tx.type in ("sell", "withdrawal"):
                     cum_qty -= tx.quantity
                     # No reducir cum_invested: mostramos capital total desplegado
@@ -892,6 +978,7 @@ class PortfolioService:
                     snapshot_date=day,
                     total_value_usd=value_usd,
                     invested_usd=cum_invested,
+                    invested_eur=cum_invested_eur.quantize(PRICE_PRECISION, ROUND_HALF_UP),
                     pnl_usd=pnl_usd,
                     pnl_pct=pnl_pct,
                 )

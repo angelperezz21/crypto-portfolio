@@ -135,7 +135,7 @@ export function PerformanceChart({ defaultRange = "30D", showKpis = true }: Perf
         )
         : <PortfolioChart
             data={chartData}
-            investedTotal={chartData[0]?.invested ?? 0}
+            investedTotal={chartData.at(-1)?.invested ?? 0}
             title={`Evolución del portafolio — ${range.label}`}
           />
       }

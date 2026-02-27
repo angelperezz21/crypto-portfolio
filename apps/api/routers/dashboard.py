@@ -46,9 +46,9 @@ async def get_overview(
             "total_value_usd": str(overview.total_value_usd),
             "total_value_eur": str(_to_eur(overview.total_value_usd, eur_usd)),
             "invested_usd": str(overview.invested_usd),
-            "invested_eur": str(_to_eur(overview.invested_usd, eur_usd)),
+            "invested_eur": str(overview.invested_eur),
             "total_deposited_usd": str(overview.total_deposited_usd),
-            "total_deposited_eur": str(_to_eur(overview.total_deposited_usd, eur_usd)),
+            "total_deposited_eur": str(overview.total_deposited_eur),
             "fees_usd": str(overview.fees_usd),
             "fees_eur": str(_to_eur(overview.fees_usd, eur_usd)),
             "pnl_unrealized_usd": str(overview.pnl_unrealized_usd),
@@ -100,6 +100,7 @@ async def get_performance(
     points = await service.calculate_performance_history(
         from_date=resolved_from,
         to_date=resolved_to,
+        eur_usd=eur_usd,
     )
     drawdown = await service.calculate_drawdown()
 
@@ -111,7 +112,7 @@ async def get_performance(
                     "total_value_usd": str(p.total_value_usd),
                     "total_value_eur": str(_to_eur(p.total_value_usd, eur_usd)),
                     "invested_usd": str(p.invested_usd),
-                    "invested_eur": str(_to_eur(p.invested_usd, eur_usd)),
+                    "invested_eur": str(p.invested_eur),
                     "pnl_usd": str(p.pnl_usd),
                     "pnl_eur": str(_to_eur(p.pnl_usd, eur_usd)),
                     "pnl_pct": str(p.pnl_pct),
@@ -166,9 +167,9 @@ async def get_dca(
             "vwap_usd": str(dca.vwap_usd),
             "vwap_eur": str(dca.vwap_eur),
             "cost_basis_usd": str(dca.cost_basis_usd),
-            "cost_basis_eur": str(_to_eur(dca.cost_basis_usd, eur_usd)),
+            "cost_basis_eur": str(dca.cost_basis_eur),
             "pnl_usd": str(dca.pnl_usd),
-            "pnl_eur": str(_to_eur(dca.pnl_usd, eur_usd)),
+            "pnl_eur": str(dca.pnl_eur),
             "pnl_pct": str(dca.pnl_pct),
             "total_events": dca.total_events,
             "buy_events": [

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.responses import err
-from routers import auth, dashboard, fiscal, portfolio
+from routers import auth, dashboard, fiscal, portfolio, prices
 from routers import settings as settings_router
 from routers import sync, transactions
 
@@ -86,6 +86,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(portfolio.router, prefix="/api/v1/portfolio", tags=["portfolio"])
+app.include_router(prices.router, prefix="/api/v1/prices", tags=["prices"])
 app.include_router(transactions.router, prefix="/api/v1/transactions", tags=["transactions"])
 app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
 app.include_router(fiscal.router, prefix="/api/v1/fiscal", tags=["fiscal"])

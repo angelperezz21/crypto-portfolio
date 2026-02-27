@@ -109,6 +109,20 @@ export async function fetchPerformance(fromDate: string, toDate: string) {
   )
 }
 
+export async function fetchLivePrices(): Promise<{ btc_eur: string | null; btc_usd: string | null }> {
+  const res = await fetch(
+    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=eur,usd",
+    { signal: AbortSignal.timeout(6000) },
+  )
+  if (!res.ok) return { btc_eur: null, btc_usd: null }
+  const data = await res.json()
+  const bitcoin = data?.bitcoin
+  return {
+    btc_eur: bitcoin?.eur != null ? String(bitcoin.eur) : null,
+    btc_usd: bitcoin?.usd != null ? String(bitcoin.usd) : null,
+  }
+}
+
 export async function fetchBtcInsights() {
   return apiFetch<import("./types").BtcInsightsData>("/api/v1/dashboard/btc-insights")
 }
