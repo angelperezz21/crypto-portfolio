@@ -4,7 +4,6 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
-  TrendingUp,
   Bitcoin,
   Zap,
   ArrowLeftRight,
@@ -16,7 +15,6 @@ import { SyncIndicator } from "./SyncIndicator"
 
 const NAV_ITEMS = [
   { href: "/",             icon: LayoutDashboard, label: "Overview"       },
-  { href: "/performance",  icon: TrendingUp,      label: "Rendimiento"    },
   { href: "/dca",          icon: Bitcoin,         label: "DCA Bitcoin"    },
   { href: "/btc",          icon: Zap,             label: "Análisis BTC"   },
   { href: "/transactions", icon: ArrowLeftRight,  label: "Transacciones"  },

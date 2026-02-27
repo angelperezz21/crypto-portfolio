@@ -35,17 +35,11 @@ async def get_overview(
     Resumen ejecutivo:
     - Valor total, capital invertido, P&L no realizado/realizado, ROI, IRR
     - Top 5 activos por valor
-    - Datos de los últimos 90 días de portfolio_snapshots
     """
     prices = await _get_prices(db, account.id)
     eur_usd = prices.get("EUR", Decimal("1.08"))
     service = PortfolioService(db=db, account_id=account.id)
     overview = await service.calculate_overview(current_prices=prices)
-
-    from_date = date.today() - timedelta(days=90)
-    history = await service.calculate_performance_history(
-        from_date=from_date, to_date=date.today()
-    )
 
     return ok(
         data={
@@ -53,6 +47,10 @@ async def get_overview(
             "total_value_eur": str(_to_eur(overview.total_value_usd, eur_usd)),
             "invested_usd": str(overview.invested_usd),
             "invested_eur": str(_to_eur(overview.invested_usd, eur_usd)),
+            "total_deposited_usd": str(overview.total_deposited_usd),
+            "total_deposited_eur": str(_to_eur(overview.total_deposited_usd, eur_usd)),
+            "fees_usd": str(overview.fees_usd),
+            "fees_eur": str(_to_eur(overview.fees_usd, eur_usd)),
             "pnl_unrealized_usd": str(overview.pnl_unrealized_usd),
             "pnl_unrealized_eur": str(_to_eur(overview.pnl_unrealized_usd, eur_usd)),
             "pnl_realized_usd": str(overview.pnl_realized_usd),
@@ -70,14 +68,6 @@ async def get_overview(
                 }
                 for m in overview.assets[:5]
                 if m.value_usd > Decimal("0")
-            ],
-            "evolution_90d": [
-                {
-                    "date": p.snapshot_date.isoformat(),
-                    "total_value_usd": str(p.total_value_usd),
-                    "total_value_eur": str(_to_eur(p.total_value_usd, eur_usd)),
-                }
-                for p in history
             ],
         },
         meta={

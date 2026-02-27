@@ -4,7 +4,6 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
-  TrendingUp,
   Bitcoin,
   Zap,
   ArrowLeftRight,
@@ -14,7 +13,6 @@ import { cn } from "@/lib/utils"
 
 const MOBILE_ITEMS = [
   { href: "/",             icon: LayoutDashboard, label: "Overview"  },
-  { href: "/performance",  icon: TrendingUp,      label: "Charts"    },
   { href: "/dca",          icon: Bitcoin,         label: "DCA"       },
   { href: "/btc",          icon: Zap,             label: "BTC"       },
   { href: "/transactions", icon: ArrowLeftRight,  label: "Historial" },

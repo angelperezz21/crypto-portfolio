@@ -102,6 +102,13 @@ export async function fetchLiquidBalance() {
   }>("/api/v1/portfolio/liquid")
 }
 
+export async function fetchPerformance(fromDate: string, toDate: string) {
+  const params = new URLSearchParams({ from_date: fromDate, to_date: toDate })
+  return apiFetch<import("./types").PerformanceData>(
+    `/api/v1/dashboard/performance?${params}`
+  )
+}
+
 export async function fetchBtcInsights() {
   return apiFetch<import("./types").BtcInsightsData>("/api/v1/dashboard/btc-insights")
 }

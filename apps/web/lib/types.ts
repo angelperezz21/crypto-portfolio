@@ -15,17 +15,15 @@ export interface TopAsset {
   pnl_pct: string
 }
 
-export interface EvolutionPoint {
-  date: string
-  total_value_usd: string
-  total_value_eur?: string
-}
-
 export interface OverviewData {
   total_value_usd: string
   total_value_eur: string
   invested_usd: string
   invested_eur: string
+  total_deposited_usd: string
+  total_deposited_eur: string
+  fees_usd: string
+  fees_eur: string
   pnl_unrealized_usd: string
   pnl_unrealized_eur: string
   pnl_realized_usd: string
@@ -34,7 +32,6 @@ export interface OverviewData {
   irr_annual_pct: string | null
   eur_usd_rate: string
   top_assets: TopAsset[]
-  evolution_90d: EvolutionPoint[]
 }
 
 export interface OverviewMeta {
@@ -79,6 +76,34 @@ export interface SyncStatusData {
   sync_status: SyncStatus
   last_sync_at: string | null
   last_job: Record<string, unknown> | null
+}
+
+// ─── /api/v1/dashboard/performance ───────────────────────────────────────────
+
+export interface PerformancePoint {
+  date: string
+  total_value_usd: string
+  total_value_eur: string
+  invested_usd: string
+  invested_eur: string
+  pnl_usd: string
+  pnl_eur: string
+  pnl_pct: string
+}
+
+export interface DrawdownData {
+  max_drawdown_pct: string
+  peak_date: string | null
+  trough_date: string | null
+  peak_value_usd: string
+  peak_value_eur: string
+  trough_value_usd: string
+  trough_value_eur: string
+}
+
+export interface PerformanceData {
+  series: PerformancePoint[]
+  drawdown: DrawdownData
 }
 
 // ─── /api/v1/dashboard/btc-insights ──────────────────────────────────────────

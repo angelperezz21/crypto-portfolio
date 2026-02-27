@@ -81,6 +81,8 @@ class AssetMetrics:
 class PortfolioOverview:
     total_value_usd: Decimal
     invested_usd: Decimal
+    total_deposited_usd: Decimal   # gross aportado + comisiones (sin descontar retiros)
+    fees_usd: Decimal              # total comisiones pagadas en USD
     pnl_unrealized_usd: Decimal
     pnl_realized_usd: Decimal
     roi_pct: Decimal
@@ -461,6 +463,50 @@ class PortfolioService:
                 invested -= val
         return invested.quantize(PRICE_PRECISION, ROUND_HALF_UP)
 
+    @staticmethod
+    def _compute_gross_invested(txns: list[Transaction]) -> Decimal:
+        """
+        Capital bruto desplegado = sum(total_value_usd de buy/deposit)
+        SIN descontar retiros fiat. Representa el dinero total enviado a Binance.
+        """
+        total = Decimal("0")
+        for tx in txns:
+            if tx.type in ("deposit", "buy"):
+                val = tx.total_value_usd or (
+                    (tx.price * tx.quantity) if tx.price else Decimal("0")
+                )
+                total += val
+        return total.quantize(PRICE_PRECISION, ROUND_HALF_UP)
+
+    @staticmethod
+    def _compute_fees_usd(
+        txns: list[Transaction],
+        prices: dict[str, Decimal],
+    ) -> Decimal:
+        """
+        Suma total de comisiones pagadas, convertidas a USD (mejor estimación).
+        - USD stablecoins: × 1
+        - EUR: × eur_usd
+        - Otros activos (BNB, BTC…): × precio actual disponible en prices
+        """
+        USD_STABLES = frozenset({"USDT", "USD", "FDUSD", "BUSD", "USDC", "DAI", "TUSD", "USDP"})
+        eur_usd = prices.get("EUR", Decimal("1.08"))
+        total = Decimal("0")
+        for tx in txns:
+            if not tx.fee_amount or not tx.fee_asset:
+                continue
+            if tx.fee_amount <= Decimal("0"):
+                continue
+            if tx.fee_asset in USD_STABLES:
+                total += tx.fee_amount
+            elif tx.fee_asset == "EUR":
+                total += tx.fee_amount * eur_usd
+            else:
+                price = prices.get(tx.fee_asset, Decimal("0"))
+                if price > Decimal("0"):
+                    total += tx.fee_amount * price
+        return total.quantize(PRICE_PRECISION, ROUND_HALF_UP)
+
     # -----------------------------------------------------------------------
     # Métodos públicos
     # -----------------------------------------------------------------------
@@ -565,6 +611,11 @@ class PortfolioService:
         )
 
         invested_usd = self._compute_invested(all_txns)
+        fees_usd = self._compute_fees_usd(all_txns, current_prices)
+        gross_invested_usd = self._compute_gross_invested(all_txns)
+        total_deposited_usd = (gross_invested_usd + fees_usd).quantize(
+            PRICE_PRECISION, ROUND_HALF_UP
+        )
 
         roi_pct = (
             ((total_value_usd - invested_usd) / invested_usd * Decimal("100")).quantize(
@@ -601,6 +652,8 @@ class PortfolioService:
         return PortfolioOverview(
             total_value_usd=total_value_usd,
             invested_usd=invested_usd,
+            total_deposited_usd=total_deposited_usd,
+            fees_usd=fees_usd,
             pnl_unrealized_usd=pnl_unrealized,
             pnl_realized_usd=total_realized.quantize(PRICE_PRECISION, ROUND_HALF_UP),
             roi_pct=roi_pct,
